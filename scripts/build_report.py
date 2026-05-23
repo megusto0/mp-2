@@ -7,6 +7,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pandas as pd
+from PIL import Image
 from docx import Document
 from docx.enum.section import WD_ORIENTATION
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
@@ -26,6 +27,8 @@ REPORT_PATH = ROOT / "report_lab2_v16_defense.docx"
 FORMULA_DIR = ROOT / "formula_images"
 FONT = "Times New Roman"
 TEXT_SIZE = Pt(14)
+
+plt.rcParams.update({"mathtext.fontset": "stix", "font.family": "STIXGeneral"})
 
 
 def as_fraction(value: float) -> str:
@@ -121,7 +124,7 @@ def add_heading(doc: Document, text: str, level: int = 1) -> None:
         set_run_font(run, bold=True)
 
 
-def set_cell_text(cell, text: str, *, bold: bool = False, size: int = 10) -> None:
+def set_cell_text(cell, text: str, *, bold: bool = False, size: float = 10.5) -> None:
     cell.text = ""
     paragraph = cell.paragraphs[0]
     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -133,7 +136,8 @@ def set_cell_text(cell, text: str, *, bold: bool = False, size: int = 10) -> Non
     cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
 
 
-def add_table(doc: Document, df: pd.DataFrame, title: str, *, size: int = 9) -> None:
+def add_table(doc: Document, df: pd.DataFrame, title: str, *, size: float = 10.5) -> None:
+    size = max(size, 9.5)
     add_paragraph(doc, title, bold=True, indent=False)
     table = doc.add_table(rows=1, cols=len(df.columns))
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -149,16 +153,14 @@ def add_table(doc: Document, df: pd.DataFrame, title: str, *, size: int = 9) -> 
 
 def render_math(lines: list[str], path: Path, *, brace: bool = False, width: float = 5.2) -> None:
     FORMULA_DIR.mkdir(exist_ok=True)
-    height = max(0.45 * len(lines), 0.65)
-    fig = plt.figure(figsize=(width, height), dpi=240)
-    ax = fig.add_axes([0, 0, 1, 1])
-    ax.axis("off")
-    y_positions = list(reversed([(idx + 0.5) / len(lines) for idx in range(len(lines))]))
-    x_text = 0.15 if brace else 0.02
-    if brace:
-        ax.text(0.03, 0.5, "{", fontsize=24 + 12 * len(lines), va="center", ha="left", family="DejaVu Serif")
-    for y, line in zip(y_positions, lines):
-        ax.text(x_text, y, f"${line}$", fontsize=16, va="center", ha="left", color="black")
+    height = max(0.42 * len(lines), 0.72)
+    if len(lines) == 1:
+        latex = lines[0]
+    else:
+        body = r"\\".join(lines)
+        latex = rf"\left\{{\substack{{{body}}}\right." if brace else rf"\substack{{{body}}}"
+    fig = plt.figure(figsize=(width, height), dpi=300)
+    fig.text(0.5, 0.5, f"${latex}$", ha="center", va="center", fontsize=15)
     fig.savefig(path, transparent=True, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
 
@@ -183,7 +185,15 @@ def add_formula(doc: Document, image_path: Path, number: str, *, width: float = 
     paragraph.paragraph_format.tab_stops.add_tab_stop(Cm(8.0), WD_TAB_ALIGNMENT.CENTER)
     paragraph.paragraph_format.tab_stops.add_tab_stop(Cm(16.0), WD_TAB_ALIGNMENT.RIGHT)
     paragraph.add_run("\t")
-    paragraph.add_run().add_picture(str(image_path), width=Inches(width))
+    run = paragraph.add_run()
+    with Image.open(image_path) as image:
+        dpi = image.info.get("dpi", (300, 300))[0] or 300
+        native_width_in = image.size[0] / dpi
+    max_width = Inches(width)
+    if native_width_in > width:
+        run.add_picture(str(image_path), width=max_width)
+    else:
+        run.add_picture(str(image_path))
     paragraph.add_run("\t")
     number_run = paragraph.add_run(number)
     set_run_font(number_run)
@@ -404,7 +414,7 @@ def main() -> None:
         "а затем сравнить найденные максимум и минимум целевой функции.",
     )
 
-    add_heading(doc, "1.1 Идея работы простыми словами", level=2)
+    add_heading(doc, "1.1 Краткое пояснение идеи работы", level=2)
     add_paragraph(
         doc,
         "В задаче нужно выбрать такие значения x1 и x2, которые одновременно удовлетворяют всем ограничениям. "
@@ -431,13 +441,13 @@ def main() -> None:
     add_heading(doc, "2 Постановка задачи")
     add_paragraph(
         doc,
-        "Зачем нужна следующая формула: она задает показатель, который требуется сначала минимизировать, "
+        "Формула (2.1) задает показатель, который требуется сначала минимизировать, "
         "а затем максимизировать при одних и тех же ограничениях.",
     )
     add_formula(doc, formulas["objective"], "(2.1)", width=3.0)
     add_paragraph(
         doc,
-        "Зачем нужна следующая система: она задает область допустимых решений. Все точки вне этой области "
+        "Система (2.2) задает область допустимых решений. Все точки вне этой области "
         "в задаче рассматривать нельзя.",
     )
     add_formula(doc, formulas["system"], "(2.2)", width=3.9)
@@ -460,18 +470,19 @@ def main() -> None:
     )
     add_paragraph(
         doc,
-        "Зачем нужна следующая формула: она показывает семейство линий уровня. При разных C линия двигается "
+        "Формула (3.1) показывает семейство линий уровня. При разных C линия двигается "
         "параллельно самой себе, и по последнему касанию с допустимой областью находится экстремум.",
     )
     add_formula(doc, formulas["level_line"], "(3.1)", width=2.8)
 
+    page_break(doc)
     vertices = vertices_table()
     add_table(doc, vertices, "Таблица 1 - Значения целевой функции в вершинах допустимой области", size=8)
     add_paragraph(
         doc,
-        "Что я должен понять из таблицы: значение Z минимально в точке A2, где Z = 60/7. "
+        "По данным таблицы значение Z минимально в точке A2, где Z = 60/7. "
         "В точках A1 и A3 значение одинаковое и равно 12, поэтому максимум достигается на всем ребре между этими точками. "
-        "Это важная проверка: если бы смотреть только на одну вершину, можно было бы пропустить неединственность максимума.",
+        "Совпадение значений в двух соседних вершинах указывает на неединственность решения задачи максимизации.",
     )
 
     figure_path = ROOT / "figures" / "feasible_region.png"
@@ -494,13 +505,13 @@ def main() -> None:
     )
     add_paragraph(
         doc,
-        "Зачем нужна следующая формула: ограничения нужно привести к равенствам, потому что симплекс-таблица работает "
+        "В записи (4.1) ограничения приведены к равенствам, потому что симплекс-таблица работает "
         "с базисными переменными. Второе ограничение предварительно умножено на -1, чтобы правая часть стала положительной.",
     )
     add_formula(doc, formulas["standard"], "(4.1)", width=4.2)
     add_paragraph(
         doc,
-        "Зачем нужна следующая формула: фаза I убирает искусственную переменную из базиса и проверяет, существует ли "
+        "Формула (4.2) задает вспомогательную задачу фазы I: она убирает искусственную переменную из базиса и проверяет, существует ли "
         "допустимое начальное решение.",
     )
     add_formula(doc, formulas["phase1"], "(4.2)", width=2.3)
@@ -508,20 +519,20 @@ def main() -> None:
     add_table(doc, steps_table(simplex_max, "phase I"), "Таблица 2 - Фаза I симплекс-метода", size=8)
     add_paragraph(
         doc,
-        "Что я должен понять из таблицы: сначала искусственная переменная a3 находится в базисе, потому что без нее "
-        "начальную таблицу построить неудобно. После двух переходов значение вспомогательной функции становится равным нулю. "
+        "На начальном шаге искусственная переменная a3 находится в базисе, так как она обеспечивает допустимый стартовый базис. "
+        "После двух переходов значение вспомогательной функции становится равным нулю. "
         "Значит, допустимое решение найдено и можно переходить к исходной целевой функции.",
     )
     add_table(doc, steps_table(simplex_max, "phase II"), "Таблица 3 - Фаза II для максимума", size=8)
     add_paragraph(
         doc,
-        "Что я должен понять из таблицы: на первой строке фазы II значение Z еще равно 60/7, то есть это не максимум. "
+        "На первой строке фазы II значение Z еще равно 60/7, то есть текущая вершина не является максимумом. "
         "После ввода переменной e3 получается значение 12. Положительных оценок больше нет, поэтому симплекс-метод останавливается.",
     )
     add_table(doc, final_tableau(simplex_max), "Таблица 4 - Итоговая симплекс-таблица для максимума", size=8)
     add_paragraph(
         doc,
-        "Что я должен понять из таблицы: итоговый базис дает точку (2; 3), но нулевая оценка у небазисной переменной "
+        "Итоговый базис дает точку (2; 3), но нулевая оценка у небазисной переменной "
         "показывает альтернативный оптимум. Поэтому правильный ответ для максимума - не одна точка, а отрезок.",
     )
 
@@ -537,21 +548,21 @@ def main() -> None:
     )
     add_paragraph(
         doc,
-        "Зачем нужна следующая формула: симплекс-алгоритм в работе реализован для максимизации, поэтому минимум исходной "
+        "Преобразование (5.1) используется потому, что симплекс-алгоритм в работе реализован для максимизации; минимум исходной "
         "функции находится через максимум функции с противоположным знаком.",
     )
     add_formula(doc, formulas["min_transform"], "(5.1)", width=4.5)
     add_table(doc, steps_table(simplex_min, "phase II"), "Таблица 5 - Фаза II для минимума через максимум -Z", size=8)
     add_paragraph(
         doc,
-        "Что я должен понять из таблицы: после фазы I уже получена вершина (12/7; 16/7). "
+        "После фазы I уже получена вершина (12/7; 16/7). "
         "Для функции -Z положительных оценок нет, поэтому двигаться в соседнюю вершину не нужно. "
         "Значение исходной функции в этой точке равно 60/7.",
     )
     add_table(doc, final_tableau(simplex_min), "Таблица 6 - Итоговая симплекс-таблица для минимума", size=8)
     add_paragraph(
         doc,
-        "Что я должен понять из таблицы: базис содержит x1 и x2, поэтому координаты решения читаются прямо из столбца "
+        "Базис содержит x1 и x2, поэтому координаты решения читаются прямо из столбца "
         "свободных членов. Остальные переменные показывают запас или избыточность по ограничениям и не меняют найденную точку.",
     )
 
@@ -573,7 +584,7 @@ def main() -> None:
     add_table(doc, check, "Таблица 7 - Сравнение результатов", size=8)
     add_paragraph(
         doc,
-        "Что я должен понять из таблицы: оба метода дают одинаковое минимальное значение и одинаковое максимальное "
+        "Сравнение показывает, что оба метода дают одинаковое минимальное значение и одинаковое максимальное "
         "значение. Отличие только в форме записи максимума: графический метод сразу показывает весь отрезок, а симплекс "
         "дает одну вершину и дополнительный признак альтернативного оптимума.",
     )
@@ -588,7 +599,7 @@ def main() -> None:
     )
     add_paragraph(
         doc,
-        "Зачем нужна итоговая формула: она компактно фиксирует окончательный ответ, который дальше можно сравнивать "
+        "Итоговая запись (7.1) компактно фиксирует окончательный ответ, который дальше можно сравнивать "
         "с графиком и симплекс-таблицами.",
     )
     add_formula(doc, formulas["answer"], "(7.1)", width=5.3)
