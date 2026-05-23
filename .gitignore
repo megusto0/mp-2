@@ -7,5 +7,6 @@ venv/
 
 report_*.docx
 report_*.pdf
+~$*.docx
 formula_images/
 lab2_method*

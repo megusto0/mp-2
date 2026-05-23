@@ -48,5 +48,3 @@ python scripts\generate_artifacts.py
 python scripts\generate_notebooks.py
 python scripts\build_report.py
 ```
-
-DOCX-отчет `report_lab2_v16_defense.docx` создается локально и не добавляется в git.
