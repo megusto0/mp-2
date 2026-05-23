@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import subprocess
+import ast
 from pathlib import Path
 
 import matplotlib
@@ -16,7 +17,7 @@ from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK, WD_TAB_ALIGNMENT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Cm, Mm, Pt
+from docx.shared import Cm, Mm, Pt, RGBColor
 
 ROOT = Path(__file__).resolve().parent
 BASE_REPORT = ROOT / "report_lab2_v16_defense.docx"
@@ -24,26 +25,29 @@ OUTPUT_REPORT = ROOT / "report_lab2_v16_final.docx"
 FORMULA_DIR = ROOT / "formula_images" / "lab2_final"
 
 FONT = "Times New Roman"
-BODY_SIZE = Pt(16)
-TABLE_SIZE = Pt(12)
-SMALL_TABLE_SIZE = Pt(11)
+MONO = "Consolas"
+BODY_SIZE = Pt(14)
+TABLE_SIZE = Pt(11)
+SMALL_TABLE_SIZE = Pt(10.5)
 
 plt.rcParams.update({"mathtext.fontset": "stix", "font.family": "STIXGeneral"})
 
 
-def set_run_font(run, *, bold: bool = False, italic: bool = False, size=BODY_SIZE) -> None:
-    run.font.name = FONT
+def set_run_font(run, *, bold: bool = False, italic: bool = False, size=BODY_SIZE, mono: bool = False) -> None:
+    name = MONO if mono else FONT
+    run.font.name = name
     run.font.size = size
     run.bold = bold
     run.italic = italic
+    run.font.color.rgb = RGBColor(0, 0, 0)
     r_pr = run._r.get_or_add_rPr()
     r_fonts = r_pr.find(qn("w:rFonts"))
     if r_fonts is None:
         r_fonts = OxmlElement("w:rFonts")
         r_pr.append(r_fonts)
-    r_fonts.set(qn("w:ascii"), FONT)
-    r_fonts.set(qn("w:hAnsi"), FONT)
-    r_fonts.set(qn("w:eastAsia"), FONT)
+    r_fonts.set(qn("w:ascii"), name)
+    r_fonts.set(qn("w:hAnsi"), name)
+    r_fonts.set(qn("w:eastAsia"), name)
 
 
 def setup_document(doc: Document) -> None:
@@ -60,6 +64,7 @@ def setup_document(doc: Document) -> None:
     style = doc.styles["Normal"]
     style.font.name = FONT
     style.font.size = BODY_SIZE
+    style.font.color.rgb = RGBColor(0, 0, 0)
     style._element.rPr.rFonts.set(qn("w:eastAsia"), FONT)
 
     for style_name in ["Heading 1", "Heading 2", "Heading 3"]:
@@ -67,6 +72,7 @@ def setup_document(doc: Document) -> None:
         style.font.name = FONT
         style.font.size = BODY_SIZE
         style.font.bold = True
+        style.font.color.rgb = RGBColor(0, 0, 0)
         style._element.rPr.rFonts.set(qn("w:eastAsia"), FONT)
 
     footer = section.footer
@@ -126,6 +132,37 @@ def add_dash(doc: Document, text: str) -> None:
     paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     run = paragraph.add_run("- " + text)
     set_run_font(run)
+
+
+def add_code_block(doc: Document, code: str, *, size=Pt(7.3)) -> None:
+    paragraph = doc.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    paragraph.paragraph_format.first_line_indent = Cm(0)
+    paragraph.paragraph_format.left_indent = Cm(0.5)
+    paragraph.paragraph_format.line_spacing = 1.0
+    paragraph.paragraph_format.space_before = Pt(3)
+    paragraph.paragraph_format.space_after = Pt(3)
+    p_pr = paragraph._p.get_or_add_pPr()
+    shading = OxmlElement("w:shd")
+    shading.set(qn("w:val"), "clear")
+    shading.set(qn("w:color"), "auto")
+    shading.set(qn("w:fill"), "F2F2F2")
+    p_pr.append(shading)
+    lines = code.splitlines()
+    for idx, line in enumerate(lines):
+        run = paragraph.add_run(line)
+        set_run_font(run, mono=True, size=size)
+        if idx < len(lines) - 1:
+            run.add_break()
+
+
+def extract_function_source(file_path: Path, func_name: str) -> str:
+    source = file_path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == func_name:
+            return "\n".join(source.splitlines()[node.lineno - 1 : node.end_lineno])
+    raise ValueError(f"{func_name} not found in {file_path}")
 
 
 def page_break(doc: Document) -> None:
@@ -584,6 +621,7 @@ def build_report() -> None:
     add_p(doc, "Лабораторная работа N 2. Решение задач линейного программирования: методические указания.", indent=False)
     add_p(doc, "Репозиторий с исходным кодом и ноутбуками: https://github.com/megusto0/mp-2.", indent=False)
 
+    page_break(doc)
     add_heading(doc, "Приложение А. Репозиторий и ноутбуки")
     add_p(
         doc,
@@ -606,6 +644,24 @@ def build_report() -> None:
     ]:
         add_dash(doc, item)
 
+    add_heading(doc, "А.1 Листинги основных функций", level=2)
+    add_p(
+        doc,
+        "Ниже приведены оформленные листинги функций, которые отвечают за поиск вершин допустимой области, "
+        "построение графика и выполнение симплекс-метода. В основной текст код не вынесен, чтобы не перегружать решение.",
+    )
+    for file_name, func_name in [
+        ("src/lp2/graphical.py", "enumerate_vertices"),
+        ("src/lp2/graphical.py", "solve_graphically"),
+        ("src/lp2/simplex.py", "standardize"),
+        ("src/lp2/simplex.py", "_run_simplex"),
+        ("src/lp2/simplex.py", "solve_with_simplex"),
+        ("src/lp2/plotting.py", "plot_feasible_region"),
+    ]:
+        add_p(doc, f"Функция {func_name} из файла {file_name}", bold=True, indent=False)
+        add_code_block(doc, extract_function_source(ROOT / file_name, func_name))
+
+    page_break(doc)
     add_heading(doc, "Приложение Б. Вопросы и ответы для защиты")
     qa = [
         ("Вопрос 1. Что такое допустимая область?", "Это множество всех точек (x1, x2), которые удовлетворяют всем ограничениям задачи."),
@@ -620,11 +676,11 @@ def build_report() -> None:
         ("Вопрос 10. Какой окончательный ответ?", "Zmin = 60/7 в точке (12/7; 16/7). Zmax = 12 на отрезке от (4/3; 8/3) до (2; 3)."),
     ]
     for question, answer in qa:
-        add_p(doc, question, bold=True)
+        add_p(doc, question, bold=True, align=WD_ALIGN_PARAGRAPH.LEFT, indent=False)
         add_p(doc, answer)
 
     doc_text = collect_doc_text(doc)
-    assert "—" not in doc_text and "–" not in doc_text
+    assert chr(0x2014) not in doc_text and chr(0x2013) not in doc_text
     assert "очевидно" not in doc_text.lower()
     assert "тривиально" not in doc_text.lower()
     assert "легко видеть" not in doc_text.lower()
@@ -633,7 +689,7 @@ def build_report() -> None:
     pages = update_fields_and_get_pages(OUTPUT_REPORT)
     final_doc = Document(OUTPUT_REPORT)
     final_text = collect_doc_text(final_doc)
-    assert "—" not in final_text and "–" not in final_text
+    assert chr(0x2014) not in final_text and chr(0x2013) not in final_text
     assert pages <= 16, f"Report is too long: {pages} pages"
     print(f"Saved {OUTPUT_REPORT}")
     print(f"Pages: {pages}")
