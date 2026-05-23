@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 import sys
+import subprocess
 from fractions import Fraction
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pandas as pd
 from docx import Document
-from docx.enum.section import WD_SECTION
+from docx.enum.section import WD_ORIENTATION
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK, WD_TAB_ALIGNMENT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Cm, Inches, Pt, RGBColor
+from docx.shared import Cm, Inches, Mm, Pt, RGBColor
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -23,6 +24,8 @@ from src.lp2.simplex import solve_with_simplex
 
 REPORT_PATH = ROOT / "report_lab2_v16_defense.docx"
 FORMULA_DIR = ROOT / "formula_images"
+FONT = "Times New Roman"
+TEXT_SIZE = Pt(14)
 
 
 def as_fraction(value: float) -> str:
@@ -36,40 +39,86 @@ def as_fraction(value: float) -> str:
 
 def configure_document(doc: Document) -> None:
     section = doc.sections[0]
-    section.top_margin = Cm(2)
-    section.bottom_margin = Cm(2)
-    section.left_margin = Cm(3)
-    section.right_margin = Cm(1.5)
+    section.orientation = WD_ORIENTATION.PORTRAIT
+    section.page_width = Mm(210)
+    section.page_height = Mm(297)
+    section.top_margin = Mm(20)
+    section.bottom_margin = Mm(20)
+    section.left_margin = Mm(30)
+    section.right_margin = Mm(15)
+    section.different_first_page_header_footer = True
 
     normal = doc.styles["Normal"]
-    normal.font.name = "Times New Roman"
-    normal._element.rPr.rFonts.set(qn("w:eastAsia"), "Times New Roman")
-    normal.font.size = Pt(14)
+    normal.font.name = FONT
+    normal._element.rPr.rFonts.set(qn("w:eastAsia"), FONT)
+    normal.font.size = TEXT_SIZE
 
     for style_name in ["Heading 1", "Heading 2", "Heading 3"]:
         style = doc.styles[style_name]
-        style.font.name = "Times New Roman"
-        style._element.rPr.rFonts.set(qn("w:eastAsia"), "Times New Roman")
+        style.font.name = FONT
+        style._element.rPr.rFonts.set(qn("w:eastAsia"), FONT)
         style.font.bold = True
         style.font.color.rgb = RGBColor(0, 0, 0)
-        style.font.size = Pt(14)
+        style.font.size = TEXT_SIZE
+
+    footer = section.footer
+    paragraph = footer.paragraphs[0]
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = paragraph.add_run()
+    begin = OxmlElement("w:fldChar")
+    begin.set(qn("w:fldCharType"), "begin")
+    instr = OxmlElement("w:instrText")
+    instr.text = "PAGE"
+    end = OxmlElement("w:fldChar")
+    end.set(qn("w:fldCharType"), "end")
+    run._r.append(begin)
+    run._r.append(instr)
+    run._r.append(end)
+    set_run_font(run)
 
 
-def add_paragraph(doc: Document, text: str, *, bold: bool = False, align=None) -> None:
+def set_run_font(run, *, bold: bool = False, italic: bool = False, size=TEXT_SIZE) -> None:
+    run.font.name = FONT
+    run.font.size = size
+    run.bold = bold
+    run.italic = italic
+    r_pr = run._r.get_or_add_rPr()
+    r_fonts = r_pr.find(qn("w:rFonts"))
+    if r_fonts is None:
+        r_fonts = OxmlElement("w:rFonts")
+        r_pr.append(r_fonts)
+    r_fonts.set(qn("w:ascii"), FONT)
+    r_fonts.set(qn("w:hAnsi"), FONT)
+    r_fonts.set(qn("w:eastAsia"), FONT)
+
+
+def page_break(doc: Document) -> None:
     paragraph = doc.add_paragraph()
-    paragraph.paragraph_format.first_line_indent = Cm(1.25)
+    paragraph.add_run().add_break(WD_BREAK.PAGE)
+
+
+def add_paragraph(doc: Document, text: str, *, bold: bool = False, align=None, indent: bool = True) -> None:
+    paragraph = doc.add_paragraph()
+    paragraph.paragraph_format.first_line_indent = Cm(1.25) if indent else Cm(0)
     paragraph.paragraph_format.line_spacing = 1.5
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(0)
     if align is not None:
         paragraph.alignment = align
+    else:
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     run = paragraph.add_run(text)
-    run.bold = bold
+    set_run_font(run, bold=bold)
 
 
 def add_heading(doc: Document, text: str, level: int = 1) -> None:
     paragraph = doc.add_heading(text, level=level)
     paragraph.paragraph_format.first_line_indent = Cm(0)
-    paragraph.paragraph_format.space_before = Pt(6)
+    paragraph.paragraph_format.line_spacing = 1.5
+    paragraph.paragraph_format.space_before = Pt(12 if level == 1 else 6)
     paragraph.paragraph_format.space_after = Pt(6)
+    for run in paragraph.runs:
+        set_run_font(run, bold=True)
 
 
 def set_cell_text(cell, text: str, *, bold: bool = False, size: int = 10) -> None:
@@ -78,14 +127,14 @@ def set_cell_text(cell, text: str, *, bold: bool = False, size: int = 10) -> Non
     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = paragraph.add_run(text)
     run.bold = bold
-    run.font.name = "Times New Roman"
-    run._element.rPr.rFonts.set(qn("w:eastAsia"), "Times New Roman")
+    run.font.name = FONT
+    run._element.rPr.rFonts.set(qn("w:eastAsia"), FONT)
     run.font.size = Pt(size)
     cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
 
 
 def add_table(doc: Document, df: pd.DataFrame, title: str, *, size: int = 9) -> None:
-    add_paragraph(doc, title, bold=True)
+    add_paragraph(doc, title, bold=True, indent=False)
     table = doc.add_table(rows=1, cols=len(df.columns))
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     table.style = "Table Grid"
@@ -126,23 +175,103 @@ def remove_table_borders(table) -> None:
 
 
 def add_formula(doc: Document, image_path: Path, number: str, *, width: float = 4.6) -> None:
-    table = doc.add_table(rows=1, cols=2)
-    remove_table_borders(table)
-    table.columns[0].width = Inches(5.4)
-    table.columns[1].width = Inches(0.8)
-
-    image_cell = table.cell(0, 0)
-    image_paragraph = image_cell.paragraphs[0]
-    image_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    image_paragraph.add_run().add_picture(str(image_path), width=Inches(width))
-
-    number_cell = table.cell(0, 1)
-    number_paragraph = number_cell.paragraphs[0]
-    number_paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    number_run = number_paragraph.add_run(number)
-    number_run.font.name = "Times New Roman"
-    number_run.font.size = Pt(14)
+    paragraph = doc.add_paragraph()
+    paragraph.paragraph_format.line_spacing = 1.5
+    paragraph.paragraph_format.space_before = Pt(4)
+    paragraph.paragraph_format.space_after = Pt(4)
+    paragraph.paragraph_format.first_line_indent = Cm(0)
+    paragraph.paragraph_format.tab_stops.add_tab_stop(Cm(8.0), WD_TAB_ALIGNMENT.CENTER)
+    paragraph.paragraph_format.tab_stops.add_tab_stop(Cm(16.0), WD_TAB_ALIGNMENT.RIGHT)
+    paragraph.add_run("\t")
+    paragraph.add_run().add_picture(str(image_path), width=Inches(width))
+    paragraph.add_run("\t")
+    number_run = paragraph.add_run(number)
+    set_run_font(number_run)
     doc.add_paragraph()
+
+
+def add_title_page(doc: Document) -> None:
+    lines_top = [
+        "Министерство образования и науки Российской Федерации",
+        "Федеральное государственное бюджетное образовательное учреждение высшего образования",
+        "«Ижевский государственный технический университет имени М. Т. Калашникова»",
+    ]
+    for line in lines_top:
+        add_paragraph(doc, line, align=WD_ALIGN_PARAGRAPH.CENTER, indent=False)
+    for _ in range(6):
+        add_paragraph(doc, "", indent=False)
+
+    add_paragraph(doc, "Лабораторная работа N 2", align=WD_ALIGN_PARAGRAPH.CENTER, indent=False, bold=True)
+    add_paragraph(
+        doc,
+        "Решение задач линейного программирования",
+        align=WD_ALIGN_PARAGRAPH.CENTER,
+        indent=False,
+        bold=True,
+    )
+    add_paragraph(doc, "По дисциплине «Методы оптимизации»", align=WD_ALIGN_PARAGRAPH.CENTER, indent=False)
+    add_paragraph(doc, "Вариант 16", align=WD_ALIGN_PARAGRAPH.CENTER, indent=False)
+    for _ in range(5):
+        add_paragraph(doc, "", indent=False)
+
+    add_paragraph(doc, "Выполнил: студент гр. М25-787-1 Р. В. Скороходов", align=WD_ALIGN_PARAGRAPH.RIGHT, indent=False)
+    add_paragraph(
+        doc,
+        "Принял: доктор физико-математических наук, профессор В. А. Тененев",
+        align=WD_ALIGN_PARAGRAPH.RIGHT,
+        indent=False,
+    )
+    for _ in range(4):
+        add_paragraph(doc, "", indent=False)
+    add_paragraph(doc, "Ижевск 2026", align=WD_ALIGN_PARAGRAPH.CENTER, indent=False)
+    page_break(doc)
+
+
+def add_contents_page(doc: Document) -> None:
+    add_paragraph(doc, "Содержание", bold=True, indent=False)
+    paragraph = doc.add_paragraph()
+    paragraph.paragraph_format.first_line_indent = Cm(0)
+    run = paragraph.add_run()
+    begin = OxmlElement("w:fldChar")
+    begin.set(qn("w:fldCharType"), "begin")
+    instr = OxmlElement("w:instrText")
+    instr.set(qn("xml:space"), "preserve")
+    instr.text = r'TOC \o "1-2" \h \z \u'
+    separate = OxmlElement("w:fldChar")
+    separate.set(qn("w:fldCharType"), "separate")
+    placeholder = OxmlElement("w:t")
+    placeholder.text = "Содержание будет обновлено автоматически."
+    end = OxmlElement("w:fldChar")
+    end.set(qn("w:fldCharType"), "end")
+    run._r.append(begin)
+    run._r.append(instr)
+    run._r.append(separate)
+    run._r.append(placeholder)
+    run._r.append(end)
+    page_break(doc)
+
+
+def update_word_fields(path: Path) -> None:
+    ps_path = str(path).replace("'", "''")
+    command = f"""
+$word = New-Object -ComObject Word.Application
+$word.Visible = $false
+$doc = $word.Documents.Open('{ps_path}')
+foreach ($toc in $doc.TablesOfContents) {{ $toc.Update() }}
+$doc.Fields.Update() | Out-Null
+$doc.Save()
+$doc.Close($false)
+$word.Quit()
+"""
+    try:
+        subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except Exception as exc:
+        print(f"Warning: could not update Word fields automatically: {exc}")
 
 
 def render_formulas() -> dict[str, Path]:
@@ -243,7 +372,7 @@ def add_method_structure(
     result: str,
     graph: str,
 ) -> None:
-    add_heading(doc, title, level=2)
+    add_heading(doc, title, level=1)
     items = [
         ("Идея метода.", idea),
         ("Какие данные нужны для запуска.", data),
@@ -265,19 +394,8 @@ def main() -> None:
     doc = Document()
     configure_document(doc)
 
-    title = doc.add_paragraph()
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = title.add_run("Лабораторная работа N 2\nРешение задач линейного программирования")
-    run.bold = True
-    run.font.name = "Times New Roman"
-    run.font.size = Pt(16)
-
-    subtitle = doc.add_paragraph()
-    subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = subtitle.add_run("Вариант 16")
-    run.bold = True
-    run.font.name = "Times New Roman"
-    run.font.size = Pt(14)
+    add_title_page(doc)
+    add_contents_page(doc)
 
     add_heading(doc, "1 Цель работы")
     add_paragraph(
@@ -286,7 +404,7 @@ def main() -> None:
         "а затем сравнить найденные максимум и минимум целевой функции.",
     )
 
-    add_heading(doc, "Идея работы простыми словами", level=2)
+    add_heading(doc, "1.1 Идея работы простыми словами", level=2)
     add_paragraph(
         doc,
         "В задаче нужно выбрать такие значения x1 и x2, которые одновременно удовлетворяют всем ограничениям. "
@@ -295,7 +413,7 @@ def main() -> None:
         "то же самое через последовательные таблицы.",
     )
 
-    add_heading(doc, "Словарь обозначений", level=2)
+    add_heading(doc, "1.2 Словарь обозначений", level=2)
     glossary = [
         "x = (x1, x2) - точка на плоскости;",
         "Z = f(x1, x2) - значение целевой функции в этой точке;",
@@ -475,7 +593,20 @@ def main() -> None:
     )
     add_formula(doc, formulas["answer"], "(7.1)", width=5.3)
 
+    add_heading(doc, "8 Список использованных источников")
+    add_paragraph(
+        doc,
+        "Лабораторная работа N 2. Решение задач линейного программирования: методические указания.",
+        indent=False,
+    )
+    add_paragraph(
+        doc,
+        "Репозиторий с исходным кодом и ноутбуками: https://github.com/megusto0/mp-2.",
+        indent=False,
+    )
+
     doc.save(REPORT_PATH)
+    update_word_fields(REPORT_PATH)
     print(f"Saved {REPORT_PATH}")
 
 
