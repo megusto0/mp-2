@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.pytest_cache/
+.venv/
+venv/
+
+report_*.docx
+report_*.pdf
+formula_images/
+lab2_method*

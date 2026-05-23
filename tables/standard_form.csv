@@ -1,0 +1,4 @@
+﻿row,normalized_constraint,basis_start,rhs
+1,5*x1 - 2*x2 <= 4,s1,4
+2,-(x1 - 2*x2 >= -4),s2,4
+3,x1 + x2 >= 4,a3,4
